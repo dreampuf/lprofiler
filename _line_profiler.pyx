@@ -118,6 +118,7 @@ cdef class LineProfiler:
         self.last_time = {}
         self.timer_unit = hpTimerUnit()
         self.enable_count = 0
+        self.enable_global = False
         for func in functions:
             self.add_function(func)
 
@@ -163,6 +164,7 @@ cdef class LineProfiler:
         self.last_time = {}
         unset_trace()
 
+
     def get_stats(self):
         """ Return a LineStats object containing the timings.
         """
@@ -197,26 +199,28 @@ cdef int python_trace_callback(object self, PyFrameObject *py_frame, int what,
 
     if what == PyTrace_LINE or what == PyTrace_RETURN:
         code = <object>py_frame.f_code
-        if code in self.code_map:
-            time = hpTimer()
-            if code in self.last_time:
-                old = self.last_time[code]
-                line_entries = self.code_map[code]
-                key = old.f_lineno
-                if key not in line_entries:
-                    entry = LineTiming(code, old.f_lineno)
-                    line_entries[key] = entry
-                else:
-                    entry = line_entries[key]
-                entry.hit(time - old.time)
-            if what == PyTrace_LINE:
-                # Get the time again. This way, we don't record much time wasted
-                # in this function.
-                self.last_time[code] = LastTime(py_frame.f_lineno, hpTimer())
+        if self.enable_global and code not in self.code_map:
+            self.code_map[code] = {}
+
+        time = hpTimer()
+        if code in self.last_time:
+            old = self.last_time[code]
+            line_entries = self.code_map[code]
+            key = old.f_lineno
+            if key not in line_entries:
+                entry = LineTiming(code, old.f_lineno)
+                line_entries[key] = entry
             else:
-                # We are returning from a function, not executing a line. Delete
-                # the last_time record.
-                del self.last_time[code]
+                entry = line_entries[key]
+            entry.hit(time - old.time)
+        if what == PyTrace_LINE:
+            # Get the time again. This way, we don't record much time wasted
+            # in this function.
+            self.last_time[code] = LastTime(py_frame.f_lineno, hpTimer())
+        else:
+            # We are returning from a function, not executing a line. Delete
+            # the last_time record.
+            del self.last_time[code]
 
     return 0
 
